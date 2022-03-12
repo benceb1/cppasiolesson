@@ -12,69 +12,96 @@ namespace olc
 			uint32_t size = 0;
 		};
 
+		// Message Body contains a header and a std::vector, containing raw bytes
+		// of infomation. This way the message can be variable length, but the size
+		// in the header must be updated.
 		template <typename T>
 		struct message
 		{
+			// Header & Body vector
 			message_header<T> header{};
 			std::vector<uint8_t> body;
 
-			// return size of entire message packet in bytes
+			// returns size of entire message packet in bytes
 			size_t size() const
 			{
-				return sizeof(message_header<T>) + body.size();
+				return body.size();
 			}
 
-			// override for std::cout compatibility - produces friendly description of message
+			// Override for std::cout compatibility - produces friendly description of message
 			friend std::ostream& operator << (std::ostream& os, const message<T>& msg)
 			{
-				os << "ID: " << int(msg.header.id) << " Size: " << msg.header.size;
+				os << "ID:" << int(msg.header.id) << " Size:" << msg.header.size;
 				return os;
 			}
 
-			// pushes any POD-like data into the message buffer
+			// Convenience Operator overloads - These allow us to add and remove stuff from
+			// the body vector as if it were a stack, so First in, Last Out. These are a 
+			// template in itself, because we dont know what data type the user is pushing or 
+			// popping, so lets allow them all. NOTE: It assumes the data type is fundamentally
+			// Plain Old Data (POD). TLDR: Serialise & Deserialise into/from a vector
+
+			// Pushes any POD-like data into the message buffer
 			template<typename DataType>
 			friend message<T>& operator << (message<T>& msg, const DataType& data)
 			{
-				// check that the type of the data being pushed is trivially copyable
+				// Check that the type of the data being pushed is trivially copyable
 				static_assert(std::is_standard_layout<DataType>::value, "Data is too complex to be pushed into vector");
-			
-				// cache current size of vector, as this will be the point we insert the data
+
+				// Cache current size of vector, as this will be the point we insert the data
 				size_t i = msg.body.size();
 
-				// resize the vector by the size of the data being pushed
+				// Resize the vector by the size of the data being pushed
 				msg.body.resize(msg.body.size() + sizeof(DataType));
 
-				// physically copy the data into the newly allocated vector space
-				// std::memcpy(hova, honnan, mekkorameret);
+				// Physically copy the data into the newly allocated vector space
 				std::memcpy(msg.body.data() + i, &data, sizeof(DataType));
 
-				// recalculate the message size
+				// Recalculate the message size
 				msg.header.size = msg.size();
 
+				// Return the target message so it can be "chained"
 				return msg;
-
 			}
 
+			// Pulls any POD-like data form the message buffer
 			template<typename DataType>
-			friend message<T>& operator >> (message<T>& msg, const DataType& data)
+			friend message<T>& operator >> (message<T>& msg, DataType& data)
 			{
-				// check that the type of the data being pushed is trivially copyable
+				// Check that the type of the data being pushed is trivially copyable
 				static_assert(std::is_standard_layout<DataType>::value, "Data is too complex to be pulled from vector");
 
-				// cache the location towards the end of the vector where the pulled data starts
+				// Cache the location towards the end of the vector where the pulled data starts
 				size_t i = msg.body.size() - sizeof(DataType);
 
-				// physically copy the data from the vector into the user vaiable
-				std::memcpy(&data, msg.body.data() + i, sizeof(DatatType));
+				// Physically copy the data from the vector into the user variable
+				std::memcpy(&data, msg.body.data() + i, sizeof(DataType));
 
-				// shrink the vecror to remove read bytes, and reset end position
+				// Shrink the vector to remove read bytes, and reset end position
 				msg.body.resize(i);
 
-				// recalculate the message size
+				// Recalculate the message size
 				msg.header.size = msg.size();
 
-				// return the target message so it can be "chained"
+				// Return the target message so it can be "chained"
 				return msg;
+			}
+		};
+
+		// Forward declare the connection (it exists somewere)
+		template <typename T>
+		class connection;
+
+		template <typename T>
+		struct owned_message
+		{
+			std::shared_ptr<connection<T>> remote = nullptr;
+			message<T> msg;
+
+			friend std::ostream& operator << (std::ostream& os, const owned_message<T>& msg)
+			{
+				os << msg.msg;
+				return os;
 			}
 		};
 	}
